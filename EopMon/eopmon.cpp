@@ -168,7 +168,7 @@ _Use_decl_annotations_ static NTSTATUS EopmonpForEachProcess(
   }
 
   // Allocate s bit larger buffer to handle new processes in case
-  const auto allocation_size =
+  const ULONG allocation_size =
       return_length + sizeof(SYSTEM_PROCESS_INFORMATION) * 10;
   const auto system_info =
       reinterpret_cast<SYSTEM_PROCESS_INFORMATION*>(ExAllocatePoolWithTag(
@@ -351,7 +351,8 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   // been modified, and the author found that running Necurs's exploit
   // (CVE-2015-0057) multiple times led a bug check. For this reason, it worth
   // considering dieing spectacularly rather than giving (potentially) false
-  // sense of security.
+  // sense of security, or it may also be an option to suspend the process if
+  // you are going to examine exactly how the process has done EoP.
 
   // HYPERPLATFORM_COMMON_DBG_BREAK();
 

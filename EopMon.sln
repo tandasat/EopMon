@@ -7,6 +7,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EopMon", "EopMon\EopMon.vcx
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{0C33BC50-802E-488D-B273-0ABCC04D886D}"
 	ProjectSection(SolutionItems) = preProject
+		.clang-format = .clang-format
+		.gitattributes = .gitattributes
+		.gitignore = .gitignore
+		.gitmodules = .gitmodules
+		clean.bat = clean.bat
+		LICENSE = LICENSE
 		README.md = README.md
 	EndProjectSection
 EndProject
