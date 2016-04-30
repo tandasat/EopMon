@@ -218,7 +218,7 @@ _Use_decl_annotations_ static bool EopmonpCheckProcessToken(HANDLE pid,
   const auto process_name = PsGetProcessImageFileName(process);
   for (auto system_process_name : kEopmonpSystemProcessNames) {
     if (!RtlEqualMemory(process_name, system_process_name,
-                        strlen(system_process_name))) {
+                        strlen(system_process_name) + 1)) {
       continue;
     }
 
