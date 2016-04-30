@@ -9,7 +9,8 @@ ability to monitor process context-swiching.
 
 While EopMon is tested against multiple EoP exploits carried out by in the wild
 malware (*1), it is rather meant to be an educational tool to demonstrate a
-potential use case of a hypervisor for security research.
+potential use case of a hypervisor for security research and not aimed for
+comprehensive exploit prevention. 
 
 EopMon is implemented on the top of HyperPlatform. See a project page for
 more details of HyperPlatform:
