@@ -28,7 +28,11 @@ extern "C" {
 // EopMon handles processes with any of those names as system processes. It
 // means that if adversaries can bypass EopMon by using other processes'
 // tokens. It may be an idea to check every process's token and see if that
-// is associated with SYSTEM privileges.
+// is associated with SYSTEM privileges. A simple way to do seems to be
+// testing if _TOKEN::SourceName == "*SYSTEM*". Or for more comprehensiveness,
+// it can monitor all processes' TOKEN::Privileges.Enabled so that privileges
+// are not enabled over value of TOKEN::Privileges.Present, as well as
+// modification of TOKEN::Privileges.Present to find its suspicious expansion.
 static const char* kEopmonpSystemProcessNames[] = {
     "Idle",        "System",       "smss.exe",  "csrss.exe",
     "wininit.exe", "services.exe", "lsass.exe", "winlogon.exe",
@@ -235,7 +239,7 @@ _Use_decl_annotations_ static bool EopmonpCheckProcessToken(HANDLE pid,
     // PLACE TO IMPROVE:
     // EopMon updates a list of system processes' tokens and IDs, while some
     // of them like csrss.exe and winlogon.exe can be terminated and re-launched
-    // when an use logout and logon to the system. One solution would be
+    // when a use logout and logon to the system. One solution would be
     // installing process notification callback and maintain the latest system
     // process list.
     g_eopmonp_system_process_tokens->emplace_back(token, system_process_name);
@@ -345,7 +349,7 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   // processes. Let us terminate the process.
 
   // PLACE TO IMPROVE:
-  // It would be better off issueing a bug check rather than killing the process
+  // It would be better off issuing a bug check rather than killing the process
   // because the system has already been exploited and could be somewhat
   // unstable condition. For example, the HalDispatchTable might have already
   // been modified, and the author found that running Necurs's exploit

@@ -10,7 +10,7 @@ ability to monitor process context-swiching.
 While EopMon is tested against multiple EoP exploits carried out by in the wild
 malware (*1), it is rather meant to be an educational tool to demonstrate a
 potential use case of a hypervisor for security research and not aimed for
-comprehensive exploit prevention. 
+comprehensive exploit prevention.
 
 EopMon is implemented on the top of HyperPlatform. See a project page for
 more details of HyperPlatform:
@@ -69,9 +69,15 @@ terminate the process as soon as possible.
 Caveats
 --------
 EopMon is meant to be an educational tool and not robust, production quality
-software which is able to handle various edge cases. For this reason, researchers
-are encouraged to use this project only as a reference to examine and develop
-ideas of using a hypervisor.
+software which is able to handle various edge cases. For example, EopMon is
+unable to detect direct shellcode execution in user address space through
+replacing a function pointer in the kernel, or _TOKEN::_SEP_TOKEN_PRIVILEGES
+manipulation[1] enabling privileges without copying a token itself. For this
+reason, researchers are encouraged to use this project only as a reference to
+examine and develop ideas of using a hypervisor.
+
+- [1] Easy local Windows Kernel exploitation
+      - https://media.blackhat.com/bh-us-12/Briefings/Cerrudo/BH_US_12_Cerrudo_Windows_Kernel_WP.pdf
 
 
 Supported Platforms
