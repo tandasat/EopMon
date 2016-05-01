@@ -26,12 +26,12 @@ extern "C" {
 
 // PLACE TO IMPROVE:
 // EopMon handles processes with any of those names as system processes. It
-// means that if adversaries can bypass EopMon by using other processes'
-// tokens. It may be an idea to check every process's token and see if that
-// is associated with SYSTEM privileges. A simple way to do seems to be
+// means that adversaries can bypass EopMon by using other processes' tokens.
+// It may be an idea to check every process's token and see if that is
+// associated with SYSTEM privileges. A simple way to implement it seems to be
 // testing if _TOKEN::SourceName == "*SYSTEM*". Or for more comprehensiveness,
-// it can monitor all processes' TOKEN::Privileges.Enabled so that privileges
-// are not enabled over value of TOKEN::Privileges.Present, as well as
+// EopMon can monitor all processes' TOKEN::Privileges.Enabled so that
+// privileges are not enabled over values of TOKEN::Privileges.Present, and
 // modification of TOKEN::Privileges.Present to find its suspicious expansion.
 static const char* kEopmonpSystemProcessNames[] = {
     "Idle",        "System",       "smss.exe",  "csrss.exe",
@@ -237,11 +237,11 @@ _Use_decl_annotations_ static bool EopmonpCheckProcessToken(HANDLE pid,
     }
 
     // PLACE TO IMPROVE:
-    // EopMon updates a list of system processes' tokens and IDs, while some
-    // of them like csrss.exe and winlogon.exe can be terminated and re-launched
-    // when a use logout and logon to the system. One solution would be
-    // installing process notification callback and maintain the latest system
-    // process list.
+    // EopMon updates a list of system processes' tokens and IDs only once,
+    // while some of them like csrss.exe and winlogon.exe can be terminated and
+    // re-launched when a use logout and logon to the system. One solution would
+    // be installing process notification callback and maintain the latest
+    // system process list.
     g_eopmonp_system_process_tokens->emplace_back(token, system_process_name);
     g_eopmonp_system_process_ids->push_back(pid);
     HYPERPLATFORM_LOG_INFO("System Token %p with PID=%Iu %s", token, pid,
@@ -295,7 +295,9 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   // the hypervisor and calling this function will be more frequent (although
   // it may slow down the system more).
 
-  // If IRQL is higher than DISPATCH_LEVEL we cannot do anything anyway
+  // Ignore when IRQL is higher than DISPATCH_LEVEL. EopMon could schedule DPC
+  // that queues a work item if an elevatated process was found, but it is not
+  // implemented for simplicity.
   if (KeGetCurrentIrql() > DISPATCH_LEVEL) {
     return;
   }
@@ -353,10 +355,10 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   // because the system has already been exploited and could be somewhat
   // unstable condition. For example, the HalDispatchTable might have already
   // been modified, and the author found that running Necurs's exploit
-  // (CVE-2015-0057) multiple times led a bug check. For this reason, it worth
-  // considering dieing spectacularly rather than giving (potentially) false
-  // sense of security, or it may also be an option to suspend the process if
-  // you are going to examine exactly how the process has done EoP.
+  // (CVE-2015-0057) multiple times led to a bug check. For this reason, it
+  // worth considering dieing spectacularly rather than giving (potentially)
+  // false sense of security, or it may also be an option to suspend the process
+  // if you are going to examine exactly how the process has done EoP.
 
   // HYPERPLATFORM_COMMON_DBG_BREAK();
 
