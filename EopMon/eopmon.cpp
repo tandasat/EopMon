@@ -56,7 +56,8 @@ struct EopmonWorkQueueItem {
 //
 
 _IRQL_requires_max_(PASSIVE_LEVEL) static NTSTATUS
-    EopmonpForEachProcess(_In_ bool (*callback_routine)(HANDLE pid, void*),
+    EopmonpForEachProcess(_In_ bool (*callback_routine)(HANDLE pid,
+                                                        void* context),
                           _In_opt_ void* context);
 
 _IRQL_requires_max_(PASSIVE_LEVEL) static bool EopmonpCheckProcessToken(
@@ -72,16 +73,34 @@ _IRQL_requires_max_(PASSIVE_LEVEL) static PUNICODE_STRING
 
 static PACCESS_TOKEN EopmonpGetProcessToken(_In_ PEPROCESS process);
 
-static PACCESS_TOKEN EopmonpGetProceesTokenFromAddress(_In_ ULONG_PTR address);
+static PACCESS_TOKEN EopmonpGetProceesTokenByAddress(_In_ ULONG_PTR address);
+
+static HANDLE EopmonpOpenProcess(_In_ HANDLE pid);
+
+static NTSTATUS EopmonpTerminateProcessTree(_In_ HANDLE process_handle,
+                                            _In_ HANDLE pid);
+
+static bool EopmonpTerminateProcessIfChild(_In_ HANDLE pid,
+                                           _In_opt_ void* context);
+
+static HANDLE EopmonpGetProcessParentProcessIdByHandle(
+    _In_ HANDLE process_handle);
+
+static LONGLONG EopmonpGetProcessCreateTimeQuadPart(_In_ HANDLE pid);
 
 #if defined(ALLOC_PRAGMA)
 #pragma alloc_text(INIT, EopmonInitializaion)
-#pragma alloc_text(INIT, EopmonpForEachProcess)
+#pragma alloc_text(PAGE, EopmonpForEachProcess)
 #pragma alloc_text(INIT, EopmonpCheckProcessToken)
 #pragma alloc_text(INIT, EopmonpInitTokenOffset)
 #pragma alloc_text(PAGE, EopmonTermination)
 #pragma alloc_text(PAGE, EopmonpTerminateProcessWorkerRoutine)
 #pragma alloc_text(PAGE, EopmonpGetProcessPathByHandle)
+#pragma alloc_text(PAGE, EopmonpOpenProcess)
+#pragma alloc_text(PAGE, EopmonpTerminateProcessTree)
+#pragma alloc_text(PAGE, EopmonpTerminateProcessIfChild)
+#pragma alloc_text(PAGE, EopmonpGetProcessParentProcessIdByHandle)
+#pragma alloc_text(PAGE, EopmonpGetProcessCreateTimeQuadPart)
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -189,11 +208,14 @@ _Use_decl_annotations_ static NTSTATUS EopmonpForEachProcess(
   }
 
   // For each process
-  for (auto current = system_info; current->NextEntryOffset;
+  for (auto current = system_info; /**/;
        current = reinterpret_cast<SYSTEM_PROCESS_INFORMATION*>(
            reinterpret_cast<ULONG_PTR>(current) + current->NextEntryOffset)) {
     if (!callback_routine(current->UniqueProcessId, context)) {
       // Exit when a callback returned false, but not as failure
+      break;
+    }
+    if (!current->NextEntryOffset) {
       break;
     }
   }
@@ -208,7 +230,7 @@ _Use_decl_annotations_ static bool EopmonpCheckProcessToken(HANDLE pid,
   PAGED_CODE();
   UNREFERENCED_PARAMETER(context);
 
-  extern const char* NTAPI PsGetProcessImageFileName(_In_ PEPROCESS Process);
+  const char* NTAPI PsGetProcessImageFileName(_In_ PEPROCESS Process);
 
   // Get EPROCESS
   PEPROCESS process = nullptr;
@@ -263,7 +285,7 @@ _Use_decl_annotations_ static bool EopmonpInitTokenOffset(PEPROCESS process,
   for (auto offset = 0ul; offset < sizeof(void*) * 0x80;
        offset += sizeof(void*)) {
     const auto address = reinterpret_cast<ULONG_PTR>(process) + offset;
-    const auto possible_token = EopmonpGetProceesTokenFromAddress(address);
+    const auto possible_token = EopmonpGetProceesTokenByAddress(address);
     if (possible_token == token) {
       g_eopmonp_offset_to_token = offset;
       HYPERPLATFORM_LOG_INFO("EPROCESS::Token offset = %x", offset);
@@ -306,20 +328,12 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   const auto& system_process_ids = *g_eopmonp_system_process_ids;
   auto& being_killed_pids = g_eopmonp_processes_being_killed;
 
-  // nt!KiSwapProcess
-  //  pid1 = attaching process
-  //  pid2 = attached process
-  // nt!SwapContext
-  //  pid1 = new process
-  //  pid2 = new process
   const auto process = PsGetCurrentProcess();
-  const auto pid1 = PsGetCurrentProcessId();
-  const auto pid2 = PsGetProcessId(process);
-  UNREFERENCED_PARAMETER(pid1);
+  const auto pid = PsGetProcessId(process);
 
   // Is it a known, safe process?
   for (auto system_pid : system_process_ids) {
-    if (pid2 == system_pid) {
+    if (pid == system_pid) {
       // Yes, it is. This process is ok.
       return;
     }
@@ -341,7 +355,7 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
 
   // Is this PID already queued for termination?
   for (auto pid_being_killed : being_killed_pids) {
-    if (pid2 == pid_being_killed) {
+    if (pid == pid_being_killed) {
       // Yes, it is. Nothing to do.
       return;
     }
@@ -365,7 +379,7 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   // Remember this PID as one already queued for termination
   for (auto& pid_being_killed : being_killed_pids) {
     if (!pid_being_killed) {
-      pid_being_killed = pid2;
+      pid_being_killed = pid;
       break;
     }
   }
@@ -380,13 +394,45 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   }
   ExInitializeWorkItem(&context->work_item,
                        EopmonpTerminateProcessWorkerRoutine, context);
-  context->dodgy_pid = pid2;
+  context->dodgy_pid = pid;
   context->system_process_name = system_process_name;
   ExQueueWorkItem(&context->work_item, CriticalWorkQueue);
   HYPERPLATFORM_LOG_DEBUG_SAFE(
       "Process %Iu with a stolen token %p from %s has been queued for "
       "termination.",
-      pid2, token, system_process_name);
+      pid, token, system_process_name);
+}
+
+// Gets an address of the \a process
+_Use_decl_annotations_ static PACCESS_TOKEN EopmonpGetProcessToken(
+    PEPROCESS process) {
+  const auto address =
+      reinterpret_cast<ULONG_PTR>(process) + g_eopmonp_offset_to_token;
+  return EopmonpGetProceesTokenByAddress(address);
+}
+
+// Get an address of a token from a value of EPROCESS::Token, which does not
+// directly point to the token address.
+_Use_decl_annotations_ static PACCESS_TOKEN EopmonpGetProceesTokenByAddress(
+    ULONG_PTR address) {
+  // To get an address, the lowest N bits where N is a size of a RefCnt field
+  // needs to be masked.
+  const auto value = *reinterpret_cast<ULONG_PTR*>(address);
+  if (IsX64()) {
+    // kd> dt nt!_EX_FAST_REF
+    //   + 0x000 Object           : Ptr64 Void
+    //   + 0x000 RefCnt : Pos 0, 4 Bits
+    //   + 0x000 Value : Uint8B
+    return reinterpret_cast<PACCESS_TOKEN>(value &
+                                           (static_cast<ULONG_PTR>(~0xf)));
+  } else {
+    // kd>  dt nt!_EX_FAST_REF
+    //   + 0x000 Object           : Ptr32 Void
+    //   + 0x000 RefCnt : Pos 0, 3 Bits
+    //   + 0x000 Value : Uint4B
+    return reinterpret_cast<PACCESS_TOKEN>(value &
+                                           (static_cast<ULONG_PTR>(~7)));
+  }
 }
 
 // Terminates a given process and wait for its completion.
@@ -400,31 +446,16 @@ _Use_decl_annotations_ static void EopmonpTerminateProcessWorkerRoutine(
   const auto dodgy_pid = context->dodgy_pid;
   const auto system_process_name = context->system_process_name;
 
-  // Open a process handle
-  OBJECT_ATTRIBUTES oa = {};
-  InitializeObjectAttributes(
-      &oa, nullptr, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, nullptr, nullptr);
-  CLIENT_ID client_id = {dodgy_pid, 0};
-  HANDLE process_handle = nullptr;
-  auto status =
-      ZwOpenProcess(&process_handle, PROCESS_ALL_ACCESS, &oa, &client_id);
-  HYPERPLATFORM_LOG_DEBUG("Process %Iu is being processed (status = %08x).",
-                          dodgy_pid, status);
-  if (!NT_SUCCESS(status)) {
+  const auto process_handle = EopmonpOpenProcess(dodgy_pid);
+  if (!process_handle) {
     goto exit;
   }
 
   // Terminate it and wait
-  status = ZwTerminateProcess(process_handle, 0);
-  HYPERPLATFORM_LOG_DEBUG("Process %Iu is being terminated (status = %08x).",
-                          dodgy_pid, status);
+  auto status = EopmonpTerminateProcessTree(process_handle, dodgy_pid);
   if (status == STATUS_PROCESS_IS_TERMINATING) {
     goto exit_with_close;
   }
-  NT_VERIFY(NT_SUCCESS(status));
-
-  status = ZwWaitForSingleObject(process_handle, FALSE, nullptr);
-  NT_VERIFY(NT_SUCCESS(status));
 
   // log stuff
   const auto process_path = EopmonpGetProcessPathByHandle(process_handle);
@@ -468,13 +499,125 @@ exit:;
   ExFreePoolWithTag(context, kHyperPlatformCommonPoolTag);
 }
 
+// Open a process handle. A caller must free a returned handle with ZwClose()
+_Use_decl_annotations_ static HANDLE EopmonpOpenProcess(HANDLE pid) {
+  PAGED_CODE();
+
+  OBJECT_ATTRIBUTES oa = {};
+  InitializeObjectAttributes(
+      &oa, nullptr, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, nullptr, nullptr);
+  CLIENT_ID client_id = {pid, 0};
+  HANDLE process_handle = nullptr;
+  auto status =
+      ZwOpenProcess(&process_handle, PROCESS_ALL_ACCESS, &oa, &client_id);
+  if (!NT_SUCCESS(status)) {
+    return nullptr;
+  }
+  return process_handle;
+}
+
+// Terminates a given process as well as its child process, and wait for
+// terminatation of the given process
+_Use_decl_annotations_ static NTSTATUS EopmonpTerminateProcessTree(
+    HANDLE process_handle, HANDLE pid) {
+  PAGED_CODE();
+
+  auto status = ZwTerminateProcess(process_handle, 0);
+  HYPERPLATFORM_LOG_DEBUG("Process %Iu is being terminated (status = %08x).",
+                          pid, status);
+  if (status == STATUS_PROCESS_IS_TERMINATING) {
+    return status;
+  }
+  status = EopmonpForEachProcess(EopmonpTerminateProcessIfChild, pid);
+  NT_VERIFY(NT_SUCCESS(status));
+  status = ZwWaitForSingleObject(process_handle, FALSE, nullptr);
+  NT_VERIFY(NT_SUCCESS(status));
+  return status;
+}
+
+// Terminates a process if it is created from a dodgy process
+_Use_decl_annotations_ static bool EopmonpTerminateProcessIfChild(
+    HANDLE pid, void* context) {
+  PAGED_CODE();
+
+  const auto dodgy_pid = reinterpret_cast<HANDLE>(context);
+
+  const auto process_handle = EopmonpOpenProcess(pid);
+  if (!process_handle) {
+    return true;
+  }
+
+  // Is this process created from the dodgy process?
+  const auto parent_pid =
+      EopmonpGetProcessParentProcessIdByHandle(process_handle);
+  if (parent_pid != dodgy_pid) {
+    goto exit;
+  }
+
+  // Is this process created later than the dodgy process?
+  const auto create_time = EopmonpGetProcessCreateTimeQuadPart(pid);
+  const auto parent_create_time =
+      EopmonpGetProcessCreateTimeQuadPart(dodgy_pid);
+  if (!create_time || !parent_create_time ||
+      create_time <= parent_create_time) {
+    goto exit;
+  }
+
+  // Yes, terminate this process as well as its child processes
+  auto status = ZwTerminateProcess(process_handle, 0);
+  HYPERPLATFORM_LOG_DEBUG("Process %Iu is being terminated (status = %08x).",
+                          pid, status);
+  status = EopmonpForEachProcess(EopmonpTerminateProcessIfChild, pid);
+  NT_VERIFY(NT_SUCCESS(status));
+
+exit:;
+  ZwClose(process_handle);
+  return true;
+}
+
+// Gets a PID of a process which inherited from to create the given process
+_Use_decl_annotations_ static HANDLE EopmonpGetProcessParentProcessIdByHandle(
+    HANDLE process_handle) {
+  PAGED_CODE();
+
+  NTSTATUS NTAPI ZwQueryInformationProcess(
+      _In_ HANDLE ProcessHandle, _In_ PROCESSINFOCLASS ProcessInformationClass,
+      _Out_ PVOID ProcessInformation, _In_ ULONG ProcessInformationLength,
+      _Out_opt_ PULONG ReturnLength);
+
+  ULONG return_length = 0;
+  PROCESS_BASIC_INFORMATION basic_info = {};
+  auto status = ZwQueryInformationProcess(process_handle,
+                                          ProcessBasicInformation, &basic_info,
+                                          sizeof(basic_info), &return_length);
+  if (!NT_SUCCESS(status)) {
+    return nullptr;
+  }
+  return reinterpret_cast<HANDLE>(basic_info.InheritedFromUniqueProcessId);
+}
+
+// Gets a creation time of the process
+_Use_decl_annotations_ static LONGLONG EopmonpGetProcessCreateTimeQuadPart(
+    HANDLE pid) {
+  PAGED_CODE();
+
+  PEPROCESS process = nullptr;
+  auto status = PsLookupProcessByProcessId(pid, &process);
+  if (!NT_SUCCESS(status)) {
+    return 0;
+  }
+  const auto create_time = PsGetProcessCreateTimeQuadPart(process);
+  ObfDereferenceObject(process);
+  return create_time;
+}
+
 // Gets an image path of the process from its handle. A caller must free a
 // returned path with ExFreePoolWithTag(..., kHyperPlatformCommonPoolTag).
 _Use_decl_annotations_ static PUNICODE_STRING EopmonpGetProcessPathByHandle(
     HANDLE process_handle) {
   PAGED_CODE();
 
-  extern NTSTATUS NTAPI ZwQueryInformationProcess(
+  NTSTATUS NTAPI ZwQueryInformationProcess(
       _In_ HANDLE ProcessHandle, _In_ PROCESSINFOCLASS ProcessInformationClass,
       _Out_ PVOID ProcessInformation, _In_ ULONG ProcessInformationLength,
       _Out_opt_ PULONG ReturnLength);
@@ -503,38 +646,6 @@ _Use_decl_annotations_ static PUNICODE_STRING EopmonpGetProcessPathByHandle(
     return nullptr;
   }
   return image_path;
-}
-
-// Gets an address of the \a process
-_Use_decl_annotations_ static PACCESS_TOKEN EopmonpGetProcessToken(
-    PEPROCESS process) {
-  const auto address =
-      reinterpret_cast<ULONG_PTR>(process) + g_eopmonp_offset_to_token;
-  return EopmonpGetProceesTokenFromAddress(address);
-}
-
-// Get an address of a token from a value of EPROCESS::Token, which does not
-// directly point to the token address.
-_Use_decl_annotations_ static PACCESS_TOKEN EopmonpGetProceesTokenFromAddress(
-    ULONG_PTR address) {
-  // To get an address, the lowest N bits where N is a size of a RefCnt field
-  // needs to be masked.
-  const auto value = *reinterpret_cast<ULONG_PTR*>(address);
-  if (IsX64()) {
-    // kd> dt nt!_EX_FAST_REF
-    //   + 0x000 Object           : Ptr64 Void
-    //   + 0x000 RefCnt : Pos 0, 4 Bits
-    //   + 0x000 Value : Uint8B
-    return reinterpret_cast<PACCESS_TOKEN>(value &
-                                           (static_cast<ULONG_PTR>(~0xf)));
-  } else {
-    // kd>  dt nt!_EX_FAST_REF
-    //   + 0x000 Object           : Ptr32 Void
-    //   + 0x000 RefCnt : Pos 0, 3 Bits
-    //   + 0x000 Value : Uint4B
-    return reinterpret_cast<PACCESS_TOKEN>(value &
-                                           (static_cast<ULONG_PTR>(~7)));
-  }
 }
 
 }  // extern "C"
