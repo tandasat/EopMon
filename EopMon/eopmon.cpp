@@ -398,8 +398,8 @@ _Use_decl_annotations_ void EopmonCheckCurrentProcessToken() {
   context->system_process_name = system_process_name;
   ExQueueWorkItem(&context->work_item, CriticalWorkQueue);
   HYPERPLATFORM_LOG_DEBUG_SAFE(
-      "Process %Iu with a stolen token %p from %s has been queued for "
-      "termination.",
+      "Exploitation detected. Process %Iu has been queued for termination. "
+      "Stolen token %p from %s",
       pid, token, system_process_name);
 }
 
@@ -461,8 +461,9 @@ _Use_decl_annotations_ static void EopmonpTerminateProcessWorkerRoutine(
   const auto process_path = EopmonpGetProcessPathByHandle(process_handle);
   if (!process_path) {
     HYPERPLATFORM_LOG_INFO(
-        "Process %Iu with a stolen token %s has been killed.", dodgy_pid,
-        system_process_name);
+        "Exploitation detected. Process %Iu has been killed. Stolen token from "
+        "%s",
+        dodgy_pid, system_process_name);
     goto exit_with_close;
   }
 
@@ -470,7 +471,8 @@ _Use_decl_annotations_ static void EopmonpTerminateProcessWorkerRoutine(
   status = PsLookupProcessByProcessId(dodgy_pid, &process);
   if (!NT_SUCCESS(status)) {
     HYPERPLATFORM_LOG_INFO(
-        "Process %Iu with a stolen token from %s has been killed. Image= %wZ",
+        "Exploitation detected. Process %Iu has been killed. Stolen token from "
+        "%s. Image= %wZ",
         dodgy_pid, system_process_name, process_path);
     ExFreePoolWithTag(process_path, kHyperPlatformCommonPoolTag);
     goto exit_with_close;
@@ -478,7 +480,8 @@ _Use_decl_annotations_ static void EopmonpTerminateProcessWorkerRoutine(
 
   const auto token = PsReferencePrimaryToken(process);
   HYPERPLATFORM_LOG_INFO(
-      "Process %Iu with a stolen token %p from %s has been killed. Image= %wZ",
+      "Exploitation detected. Process %Iu has been killed. Stolen token %p "
+      "from %s. Image= %wZ",
       dodgy_pid, token, system_process_name, process_path);
 
   PsDereferencePrimaryToken(token);
@@ -523,8 +526,9 @@ _Use_decl_annotations_ static NTSTATUS EopmonpTerminateProcessTree(
   PAGED_CODE();
 
   auto status = ZwTerminateProcess(process_handle, 0);
-  HYPERPLATFORM_LOG_DEBUG("Process %Iu is being terminated (status = %08x).",
-                          pid, status);
+  HYPERPLATFORM_LOG_DEBUG(
+      "Exploitation detected. Process %Iu is being terminated (status = %08x).",
+      pid, status);
   if (status == STATUS_PROCESS_IS_TERMINATING) {
     return status;
   }
@@ -565,8 +569,9 @@ _Use_decl_annotations_ static bool EopmonpTerminateProcessIfChild(
 
   // Yes, terminate this process as well as its child processes
   auto status = ZwTerminateProcess(process_handle, 0);
-  HYPERPLATFORM_LOG_DEBUG("Process %Iu is being terminated (status = %08x).",
-                          pid, status);
+  HYPERPLATFORM_LOG_DEBUG(
+      "Exploitation detected. Process %Iu is being terminated (status = %08x).",
+      pid, status);
   status = EopmonpForEachProcess(EopmonpTerminateProcessIfChild, pid);
   NT_VERIFY(NT_SUCCESS(status));
 
