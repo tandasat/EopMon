@@ -1,6 +1,5 @@
 @echo off
 del *.sdf
-
 del *.VC.db
 del /s *.aps
 del /a:h *.suo
