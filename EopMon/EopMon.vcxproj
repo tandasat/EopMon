@@ -90,9 +90,12 @@
   <ItemGroup>
     <ClCompile Include="..\HyperPlatform\HyperPlatform\driver.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\ept.cpp" />
+    <ClCompile Include="..\HyperPlatform\HyperPlatform\global_object.cpp" />
+    <ClCompile Include="..\HyperPlatform\HyperPlatform\hotplug_callback.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\kernel_stl.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\log.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\performance.cpp" />
+    <ClCompile Include="..\HyperPlatform\HyperPlatform\power_callback.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\util.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\vm.cpp" />
     <ClCompile Include="..\HyperPlatform\HyperPlatform\vmm.cpp" />
@@ -103,11 +106,14 @@
     <ClInclude Include="..\HyperPlatform\HyperPlatform\common.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\driver.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\ept.h" />
+    <ClInclude Include="..\HyperPlatform\HyperPlatform\global_object.h" />
+    <ClInclude Include="..\HyperPlatform\HyperPlatform\hotplug_callback.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\ia32_type.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\kernel_stl.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\log.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\performance.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\perf_counter.h" />
+    <ClInclude Include="..\HyperPlatform\HyperPlatform\power_callback.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\util.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\util_page_constants.h" />
     <ClInclude Include="..\HyperPlatform\HyperPlatform\vm.h" />

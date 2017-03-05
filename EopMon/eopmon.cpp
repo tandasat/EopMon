@@ -9,7 +9,8 @@
 #include "../HyperPlatform/HyperPlatform/common.h"
 #include "../HyperPlatform/HyperPlatform/log.h"
 #include "../HyperPlatform/HyperPlatform/util.h"
-#include "../HyperPlatform/HyperPlatform/kernel_stl.h"
+#undef _HAS_EXCEPTIONS
+#define _HAS_EXCEPTIONS 0
 #include <vector>
 #include <algorithm>
 
